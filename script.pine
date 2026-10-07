@@ -1,0 +1,285 @@
+//@version=6
+indicator("custom indicator", overlay = true)
+
+// User Inputs
+yPos        = input.string("Top", "Watermark Vertical Location", options = ["Top", "Middle", "Bottom"], inline = '1')
+xPos        = input.string("Center", "Watermark Horizontal Location", options = ["Left", "Center", "Right"], inline = '1')
+offsetY     = input.int(40, "Vertical Offset", minval=0, maxval=100) // Allows custom vertical movement
+spacingY    = 5 // Reduced spacing between line 1 and line 2
+
+txtCol      = input.color(color.rgb(255, 255, 255), 'Text Color', inline = '2')
+txtSize     = input.string('Large', 'Text Size', options = ['Huge', 'Large', 'Normal', 'Small'], inline = '2')
+
+showSMA20   = input.bool(true, 'SMA 20', inline = '3')
+SMA20Color  = input.color(color.rgb(172, 76, 175, 46), 'Text Color', inline = '3')
+
+showSMA50   = input.bool(true, 'SMA 50', inline = '4')
+SMA50Color  = input.color(color.green, 'Text Color', inline = '4')
+
+showSMA100  = input.bool(true, 'SMA 100', inline = '5')
+SMA100Color = input.color(color.blue, 'Text Color', inline = '5')
+
+showSMA150  = input.bool(true, 'SMA 150', inline = '6')
+SMA150Color  = input.color(color.yellow, 'Text Color', inline = '6')
+
+showSMA200  = input.bool(true, 'SMA 200', inline = '7')
+SMA200Color = input.color(color.red, inline = '7')
+
+symTime     = input.bool(true, 'Symbol & Time Frame')
+compName    = input.bool(true, 'Company Name')
+indSec      = input.bool(true, 'Industry & Sector')
+mCap        = input.bool(true, 'Show Market Cap')
+showATR     = input.bool(true, "Show ATR (14-Day) & %")
+
+// ATR Threshold Inputs
+atrRedThreshold = input.float(6.0, "Red Threshold (%)", minval=0)
+atrYellowThreshold = input.float(3.0, "Yellow Threshold (%)", minval=0)
+
+// Price label settings (for SMAs)
+showSMALabels       = input.bool(true, "Show SMA Labels by Price", inline="PL1")
+labelsRightOffset   = input.int(3, "Right Offset (bars)", minval=0, maxval=200, inline="PL1")
+labelTextColor      = input.color(color.white, "Label Text Color", inline="PL2")
+labelBgTransparency = input.int(70, "Label BG Transparency (0-100)", minval=0, maxval=100, inline="PL2")
+
+// Font size mapping
+sizer = switch txtSize
+    'Huge' => size.huge
+    'Large' => size.large
+    'Normal' => size.normal
+    'Small' => size.small
+
+// Market Cap Calculation
+rounder(float this) =>
+    if this >= 1000000000000
+        math.round(math.abs(this / 1000000000000),2)
+    else if this >= 1000000000
+        math.round(math.abs(this / 1000000000),2)
+    else 
+        math.round(math.abs(this / 1000000),2)
+
+// Fetch EPS data
+eps = request.financial(syminfo.tickerid, "EARNINGS_PER_SHARE", "TTM")
+
+// Calculate P/E ratio
+peRatio = (close / eps) > 0 ? math.round(close / eps, 2) : 0
+
+// Ticker and Market Data
+sector  = syminfo.sector
+ind     = syminfo.industry
+tick    = syminfo.ticker
+tf      = timeframe.period
+name    = syminfo.description
+tso     = syminfo.shares_outstanding_total
+marketcap   = tso * close 
+marCap      =  marketcap > 1000000000000 ? 'T' : marketcap > 1000000000 ? 'B' : 'M' 
+
+// Adjust Timeframe Display
+tf := timeframe.period == 'D' ? '1D' : timeframe.period == 'W' ? '1W' : timeframe.period == '60' ? '1H' : 
+     timeframe.period == '120' ? '2H' : timeframe.period == '180' ? '3H' : timeframe.period == '240' ? '4H' : tf
+
+// ATR Calculation
+atrValue = ta.atr(14) // 14-day ATR calculation
+atrPercent = (atrValue / close) * 100 // Correct ATR percentage calculation
+
+// ATR Indicator Color Logic
+atrEmoji = atrPercent >= atrRedThreshold ? "🔴" : atrPercent >= atrYellowThreshold ? "🟡" : "🟢"
+
+// Determine Table Position
+posTable = str.lower(yPos) + '_' + str.lower(xPos)
+
+// Create Table for Watermark
+var table sec = table.new(posTable, 1,6, color.new(color.white,100), color.new(color.white,100), 1, color.new(color.white,100), 1)
+if barstate.islast
+    sec.cell(0,0, "", text_color = color.new(color.white, 100))  // Empty row for spacing
+    if compName
+        sec.cell(0,1, mCap ? name + ' (' + str.tostring(nz(rounder(marketcap))) + marCap + ')' : name, text_color = txtCol, text_size = sizer, text_halign=text.align_left)
+    if symTime
+        sec.cell(0,2,tick + ', ' + tf, text_color = txtCol, text_size = sizer, text_halign=text.align_left)
+    if indSec
+        sec.cell(0,3, not na(sector) ? sector + ', ' + ind : '', text_color = txtCol, text_size = sizer, text_halign=text.align_left)
+    if showATR
+        sec.cell(0,4, "ATR (14): " + str.tostring(atrValue, "#.##") + " (" + str.tostring(atrPercent, "#.##") + "%) " + atrEmoji, text_color = txtCol, text_size = sizer, text_halign=text.align_left)
+    sec.cell(0,5, "PE Ratio: " + str.tostring(peRatio), text_color = txtCol, text_size = sizer, text_halign=text.align_left)
+
+// 20, 50, 100, 150, and 200 SMA Calculations (true SMAs)
+sma20  = ta.sma(close, 20)
+sma50  = ta.sma(close, 50)
+sma100 = ta.sma(close, 100)
+sma150 = ta.sma(close, 150)
+sma200 = ta.sma(close, 200)
+
+// Plot SMAs (no trackprice, no dotted line)
+plot(showSMA20 ? sma20 : na, title="SMA 20", color=SMA20Color, linewidth=2)
+plot(showSMA50 ? sma50 : na, title="SMA 50", color=SMA50Color, linewidth=2)
+plot(showSMA100 ? sma100 : na, title="SMA 100", color=SMA100Color, linewidth=2)
+plot(showSMA150 ? sma150 : na, title="SMA 150", color=SMA150Color, linewidth=2)
+plot(showSMA200 ? sma200 : na, title="SMA 200", color=SMA200Color, linewidth=2)
+
+// ===== SMA Price Labels near the right axis =====
+fmt(v) => str.tostring(v, "#.##")
+
+var label l20  = na
+var label l50  = na
+var label l100 = na
+var label l150 = na
+var label l200 = na
+
+if barstate.islast and showSMALabels
+    // Position labels a few bars into the future so they sit near the right axis
+    rX = bar_index + labelsRightOffset
+
+    // 20
+    if showSMA20
+        if na(l20)
+            l20 := label.new(rX, sma20, "SMA 20: " + fmt(sma20), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, textcolor=labelTextColor, color=color.new(SMA20Color, labelBgTransparency), size=sizer)
+        else
+            label.set_xy(l20, rX, sma20)
+            label.set_text(l20, "SMA 20: " + fmt(sma20))
+            label.set_color(l20, color.new(SMA20Color, labelBgTransparency))
+            label.set_textcolor(l20, labelTextColor)
+            label.set_size(l20, sizer)
+    else
+        if not na(l20)
+            label.delete(l20)
+            l20 := na
+
+    // 50
+    if showSMA50
+        if na(l50)
+            l50 := label.new(rX, sma50, "SMA 50: " + fmt(sma50), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, textcolor=labelTextColor, color=color.new(SMA50Color, labelBgTransparency), size=sizer)
+        else
+            label.set_xy(l50, rX, sma50)
+            label.set_text(l50, "SMA 50: " + fmt(sma50))
+            label.set_color(l50, color.new(SMA50Color, labelBgTransparency))
+            label.set_textcolor(l50, labelTextColor)
+            label.set_size(l50, sizer)
+    else
+        if not na(l50)
+            label.delete(l50)
+            l50 := na
+
+    // 100
+    if showSMA100
+        if na(l100)
+            l100 := label.new(rX, sma100, "SMA 100: " + fmt(sma100), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, textcolor=labelTextColor, color=color.new(SMA100Color, labelBgTransparency), size=sizer)
+        else
+            label.set_xy(l100, rX, sma100)
+            label.set_text(l100, "SMA 100: " + fmt(sma100))
+            label.set_color(l100, color.new(SMA100Color, labelBgTransparency))
+            label.set_textcolor(l100, labelTextColor)
+            label.set_size(l100, sizer)
+    else
+        if not na(l100)
+            label.delete(l100)
+            l100 := na
+
+    // 150
+    if showSMA150
+        if na(l150)
+            l150 := label.new(rX, sma150, "SMA 150: " + fmt(sma150), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, textcolor=labelTextColor, color=color.new(SMA150Color, labelBgTransparency), size=sizer)
+        else
+            label.set_xy(l150, rX, sma150)
+            label.set_text(l150, "SMA 150: " + fmt(sma150))
+            label.set_color(l150, color.new(SMA150Color, labelBgTransparency))
+            label.set_textcolor(l150, labelTextColor)
+            label.set_size(l150, sizer)
+    else
+        if not na(l150)
+            label.delete(l150)
+            l150 := na
+
+    // 200
+    if showSMA200
+        if na(l200)
+            l200 := label.new(rX, sma200, "SMA 200: " + fmt(sma200), xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, textcolor=labelTextColor, color=color.new(SMA200Color, labelBgTransparency), size=sizer)
+        else
+            label.set_xy(l200, rX, sma200)
+            label.set_text(l200, "SMA 200: " + fmt(sma200))
+            label.set_color(l200, color.new(SMA200Color, labelBgTransparency))
+            label.set_textcolor(l200, labelTextColor)
+            label.set_size(l200, sizer)
+    else
+        if not na(l200)
+            label.delete(l200)
+            l200 := na
+
+//Gaps
+// ========== Inputs ==========
+showGaps      = input.bool(true, "Show Open Gaps", tooltip="Enable/disable plotting of open gaps.")
+minGapPoints  = input.float(0.0, "Minimum Gap Size (points)", minval=0.0, tooltip="Only draw gaps larger than this size.")
+gapUpColor    = input.color(color.new(color.teal, 80), "Gap Up Fill Color")
+gapDownColor  = input.color(color.new(color.orange, 80), "Gap Down Fill Color")
+borderColor   = input.color(color.new(color.gray, 0), "Border Line Color")
+borderWidth   = input.int(1, "Border Line Width", minval=1, maxval=4)
+
+// ========== State Arrays ==========
+var linesTop      = array.new_line()
+var linesBottom   = array.new_line()
+var gapTopVals    = array.new_float()
+var gapBotVals    = array.new_float()
+var gapDirs       = array.new_int()   // +1 = gap up, -1 = gap down
+var gapFills      = array.new_linefill()
+
+// ========== Helper: add gap ==========
+add_gap(top, bottom, dir, fillColor) =>
+    // Create two horizontal lines extended to the right
+    lt = line.new(x1=bar_index, y1=top, x2=bar_index+1, y2=top, xloc=xloc.bar_index, extend=extend.right, color=borderColor, width=borderWidth)
+    lb = line.new(x1=bar_index, y1=bottom, x2=bar_index+1, y2=bottom, xloc=xloc.bar_index, extend=extend.right, color=borderColor, width=borderWidth)
+    lf = linefill.new(lt, lb, fillColor)
+    // Store
+    array.push(linesTop, lt)
+    array.push(linesBottom, lb)
+    array.push(gapTopVals, top)
+    array.push(gapBotVals, bottom)
+    array.push(gapDirs, dir)
+    array.push(gapFills, lf)
+
+// ========== Detect full gaps (bar-to-bar) ==========
+fullGapUp   = showGaps and na(high[1]) == false and low > high[1]
+fullGapDown = showGaps and na(low[1]) == false and high < low[1]
+
+// Compute gap bounds (top above bottom)
+gapUpTop    = low
+gapUpBottom = high[1]
+gapDownTop  = low[1]
+gapDownBottom = high
+
+// Size filter
+gapUpSize   = gapUpTop - gapUpBottom
+gapDownSize = gapDownTop - gapDownBottom
+
+// Create rectangles for qualifying gaps
+if fullGapUp and gapUpSize >= minGapPoints
+    add_gap(gapUpTop, gapUpBottom, +1, gapUpColor)
+
+if fullGapDown and gapDownSize >= minGapPoints
+    add_gap(gapDownTop, gapDownBottom, -1, gapDownColor)
+
+// ========== Close logic: remove when gap is filled ==========
+if array.size(gapDirs) > 0
+    // iterate backwards so removal doesn't shift indices
+    for i = array.size(gapDirs) - 1 to 0
+        dir = array.get(gapDirs, i)
+        top = array.get(gapTopVals, i)
+        bot = array.get(gapBotVals, i)
+
+        // Gap considered closed when price touches the far edge:
+        // - Gap Up closes when price trades down to previous high (bot)
+        // - Gap Down closes when price trades up to previous low (top)
+        closed = (dir == +1 and low <= bot) or (dir == -1 and high >= top)
+
+        if closed or not showGaps
+            // Delete graphical objects
+            lt = array.get(linesTop, i)
+            lb = array.get(linesBottom, i)
+            lf = array.get(gapFills, i)
+            line.delete(lt)
+            line.delete(lb)
+            linefill.delete(lf)
+            // Remove from arrays
+            array.remove(linesTop, i)
+            array.remove(linesBottom, i)
+            array.remove(gapTopVals, i)
+            array.remove(gapBotVals, i)
+            array.remove(gapDirs, i)
+            array.remove(gapFills, i)
